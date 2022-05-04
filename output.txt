@@ -1,0 +1,27 @@
+Compiler Project
+Output of Tokens Array : 
+[
+  { type: 'paren', value: '(' },
+  { type: 'name', value: 'add' },
+  { type: 'number', value: '2' },
+  { type: 'paren', value: '(' },
+  { type: 'name', value: 'subtract' },
+  { type: 'number', value: '4' },
+  { type: 'number', value: '2' },
+  { type: 'paren', value: ')' },
+  { type: 'paren', value: ')' }
+]
+Transformer output : 
+ Program
+	 ExpressionStatement
+		 CallExpression
+			 Identifier  -  add
+			 NumberLiteral  -  2
+			 CallExpression
+				 Identifier  -  subtract
+				 NumberLiteral  -  4
+				 NumberLiteral  -  2
+Code Generator Output : 
+add(2, subtract(4, 2));
+Input Given : (add 2 (subtract 4 2))
+Output: add(2, subtract(4, 2));
