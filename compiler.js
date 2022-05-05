@@ -1,151 +1,157 @@
+const fs = require("fs");
 
-"use strict";
-console.log('Compiler Project');
+console.log("Compiler Project");
 
-function tokenizer(input) {
+tokenizeCharacter = (type, value, input, current) =>
+  value === input[current] ? [1, { type, value }] : [0, null];
+
+tokenizeParenOpen = (input, current) =>
+  tokenizeCharacter("paren", "(", input, current);
+
+tokenizeParenClose = (input, current) =>
+  tokenizeCharacter("paren", ")", input, current);
+
+tokenizePattern = (type, pattern, input, current) => {
+  let char = input[current];
+  let consumedChars = 0;
+  if (pattern.test(char)) {
+    let value = "";
+    while (char && pattern.test(char)) {
+      value += char;
+      consumedChars++;
+      char = input[current + consumedChars];
+    }
+    return [consumedChars, { type, value }];
+  }
+  return [0, null];
+};
+
+tokenizeNumber = (input, current) =>
+  tokenizePattern("number", /[0-9]/, input, current);
+
+tokenizeName = (input, current) =>
+  tokenizePattern("name", /[a-z]/i, input, current);
+
+tokenizeString = (input, current) => {
+  if (input[current] === '"') {
+    let value = "";
+    let consumedChars = 0;
+    consumedChars++;
+    char = input[current + consumedChars];
+    while (char !== '"') {
+      if (char === undefined) {
+        throw new TypeError("unterminated string ");
+      }
+      value += char;
+      consumedChars++;
+      char = input[current + consumedChars];
+    }
+    return [consumedChars + 1, { type: "string", value }];
+  }
+  return [0, null];
+};
+
+skipWhiteSpace = (input, current) =>
+  /\s/.test(input[current]) ? [1, null] : [0, null];
+
+tokenizers = [
+  skipWhiteSpace,
+  tokenizeParenOpen,
+  tokenizeParenClose,
+  tokenizeString,
+  tokenizeNumber,
+  tokenizeName
+];
+
+tokenizer = (input) => {
   let current = 0;
-
   let tokens = [];
-
   while (current < input.length) {
-    let char = input[current];
-
-    if (char === "(") {
-      tokens.push({
-        type: "paren",
-        value: "("
-      });
-
-      current++;
-
-      continue;
-    }
-
-    if (char === ")") {
-      tokens.push({
-        type: "paren",
-        value: ")"
-      });
-      current++;
-      continue;
-    }
-
-    let WHITESPACE = /\s/;
-    if (WHITESPACE.test(char)) {
-      current++;
-      continue;
-    }
-
-    let NUMBERS = /[0-9]/;
-    if (NUMBERS.test(char)) {
-      let value = "";
-      while (NUMBERS.test(char)) {
-        value += char;
-        char = input[++current];
+    let tokenized = false;
+    tokenizers.forEach((tokenizer_fn) => {
+      if (tokenized) {
+        return;
       }
-
-      tokens.push({ type: "number", value });
-
-      continue;
-    }
-
-    if (char === '"') {
-      let value = "";
-
-      char = input[++current];
-
-      while (char !== '"') {
-        value += char;
-        char = input[++current];
+      let [consumedChars, token] = tokenizer_fn(input, current);
+      if (consumedChars !== 0) {
+        tokenized = true;
+        current += consumedChars;
       }
-
-      char = input[++current];
-
-      tokens.push({ type: "string", value });
-
-      continue;
-    }
-
-    let LETTERS = /[a-z]/i;
-    if (LETTERS.test(char)) {
-      let value = "";
-
-      while (LETTERS.test(char)) {
-        value += char;
-        char = input[++current];
+      if (token) {
+        tokens.push(token);
       }
-
-      tokens.push({ type: "name", value });
-
-      continue;
+    });
+    if (!tokenized) {
+      throw new TypeError("I dont know what this character is: " + char);
     }
-
-    throw new TypeError("I dont know what this character is: " + char);
   }
-
   return tokens;
-}
+};
 
-var input = "(add 2 (subtract 4 2))";
+parseNumber = (tokens, current) => [
+  current + 1,
+  { type: "NumberLiteral", value: tokens[current].value }
+];
 
-var tokens = tokenizer(input);
+parseString = (tokens, current) => [
+  current + 1,
+  { type: "StringLiteral", value: tokens[current].value }
+];
 
-console.log("Output of Tokens Array : ");
-console.log(tokens);
-
-function parser(tokens) {
-  var current = 0;
-
-  function walk() {
-    var token = tokens[current];
-
-    if (token.type === "number") {
-      current++;
-
-      return {
-        type: "NumberLiteral",
-        value: token.value
-      };
-    }
-
-    if (token.type === "paren" && token.value === "(") {
-      token = tokens[++current];
-
-      var node = {
-        type: "CallExpression",
-        name: token.value,
-        params: []
-      };
-
-      token = tokens[++current];
-
-      while (
-        token.type !== "paren" ||
-        (token.type === "paren" && token.value !== ")")
-      ) {
-        node.params.push(walk());
-        token = tokens[current];
-      }
-
-      current++;
-
-      return node;
-    }
-
-    throw new TypeError(token.type);
+parseExpression = (tokens, current) => {
+  let token = tokens[++current];
+  let node = {
+    type: "CallExpression",
+    name: token.value,
+    params: []
+  };
+  token = tokens[++current];
+  while (!(token.type === "paren" && token.value === ")")) {
+    [current, param] = parseToken(tokens, current);
+    node.params.push(param);
+    token = tokens[current];
   }
+  current++;
+  return [current, node];
+};
 
-  var ast = {
+parseToken = (tokens, current) => {
+  let token = tokens[current];
+  if (token.type === "number") {
+    return parseNumber(tokens, current);
+  }
+  if (token.type === "string") {
+    return parseString(tokens, current);
+  }
+  if (token.type === "paren" && token.value === "(") {
+    return parseExpression(tokens, current);
+  }
+  throw new TypeError(token.type);
+};
+
+function parseProgram(tokens) {
+  let current = 0;
+  let ast = {
     type: "Program",
     body: []
   };
-
+  let node = null;
   while (current < tokens.length) {
-    ast.body.push(walk());
+    [current, node] = parseToken(tokens, current);
+    ast.body.push(node);
   }
-
   return ast;
 }
+parser = parseProgram;
+
+emitNumber = (node) => node.value;
+
+emitString = (node) => `"${node.value}"`;
+
+emitProgram = (node) => node.body.map((exp) => emitter(exp) + ";").join("\n");
+
+emitExpression = (node) =>
+  `${node.name}(${node.params.map(emitter).join(", ")})`;
 
 function traverser(ast, visitor) {
   function traverseArray(array, parent) {
@@ -263,131 +269,49 @@ function printAST(ast) {
   traverseNode(ast, null, 0);
 }
 
-var ast = {
-  type: "Program",
-  body: [
-    {
-      type: "CallExpression",
-      name: "add",
-      params: [
-        {
-          type: "NumberLiteral",
-          value: "2"
-        },
-        {
-          type: "CallExpression",
-          name: "subtract",
-          params: [
-            {
-              type: "NumberLiteral",
-              value: "4"
-            },
-            {
-              type: "NumberLiteral",
-              value: "2"
-            }
-          ]
-        }
-      ]
-    }
-  ]
-};
-
-var newAst = transformer(ast);
-console.log("Transformer output : ");
-printAST(newAst);
-
-function codeGenerator(node) {
+emitter = (node) => {
   switch (node.type) {
     case "Program":
-      return node.body.map(codeGenerator).join("\n");
-
-    case "ExpressionStatement":
-      return codeGenerator(node.expression) + ";";
-
+      return emitProgram(node);
     case "CallExpression":
-      return (
-        codeGenerator(node.callee) +
-        "(" +
-        node.arguments.map(codeGenerator).join(", ") +
-        ")"
-      );
-
-    case "Identifier":
-      return node.name;
-
+      return emitExpression(node);
     case "NumberLiteral":
-      return node.value;
-
+      return emitNumber(node);
     case "StringLiteral":
-      return '"' + node.value + '"';
-
+      return emitString(node);
     default:
       throw new TypeError(node.type);
   }
-}
-
-var newAST = {
-  type: "Program",
-  body: [
-    {
-      type: "ExpressionStatement",
-      expression: {
-        type: "CallExpression",
-        callee: {
-          type: "Identifier",
-          name: "add"
-        },
-        arguments: [
-          {
-            type: "NumberLiteral",
-            value: "2"
-          },
-          {
-            type: "CallExpression",
-            callee: {
-              type: "Identifier",
-              name: "subtract"
-            },
-            arguments: [
-              {
-                type: "NumberLiteral",
-                value: "4"
-              },
-              {
-                type: "NumberLiteral",
-                value: "2"
-              }
-            ]
-          }
-        ]
-      }
-    }
-  ]
 };
 
-var output = codeGenerator(newAST);
-console.log("Code Generator Output : ");
-console.log(output);
-
-function compiler(input) {
+my_compiler = (input) => {
   let tokens = tokenizer(input);
+
+  console.log("Output of Tokens Array : ");
+  console.log(tokens);
   let ast = parser(tokens);
-  let newAst = transformer(ast);
-  let output = codeGenerator(newAst);
 
+  console.log(ast);
+  var newAst = transformer(ast);
+  console.log("Transformer output : ");
+  printAST(newAst);
+
+  let output = emitter(ast);
+  console.log("Code Generator Output : ");
+  console.log(output);
   return output;
-}
-
-var input = "(add 2 (subtract 4 2))";
-console.log("Input Given : " + input);
-console.log("Output: " + compiler(input));
-
-module.exports = {
-  tokenizer,
-  parser,
-  printAST,
-  transformer,
-  codeGenerator,
-  compiler
 };
+
+const readline = require("readline").createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+readline.question("Enter Your Input : ", (input) => {
+  console.log(`Given Input : ${input}`);
+  console.log("\r\n");
+
+  let finalOutput = my_compiler(input);
+  console.log("Output : " + finalOutput);
+  readline.close();
+});
